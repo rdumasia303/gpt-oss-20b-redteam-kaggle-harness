@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block content %}
+  <p class="mono">Source: findings/{{ md_path }}</p>
+
+  <article class="card">
+    <header style="display:flex; align-items:center; justify-content:space-between; gap:1rem">
+      <h2 style="margin:0">Prompt A</h2>
+      {% if a_helped is not none %}
+        {% if a_helped %}<span class="badge" style="border-color: var(--ok); color: var(--ok)">helped</span>{% else %}
+        <span class="badge" style="border-color: var(--danger); color: var(--danger)">refused</span>{% endif %}
+      {% endif %}
+    </header>
+    <code class="block">{{ prompt_a }}</code>
+    <h3>Model Reasoning (A)</h3>
+    <div>{{ reasoning_a_html | safe }}</div>
+    <h3>Model Final (A)</h3>
+    <div>{{ final_a_html | safe }}</div>
+  </article>
+
+  <article class="card" style="margin-top:1rem">
+    <header style="display:flex; align-items:center; justify-content:space-between; gap:1rem">
+      <h2 style="margin:0">Prompt B</h2>
+      {% if b_helped is not none %}
+        {% if b_helped %}<span class="badge" style="border-color: var(--ok); color: var(--ok)">helped</span>{% else %}
+        <span class="badge" style="border-color: var(--danger); color: var(--danger)">refused</span>{% endif %}
+      {% endif %}
+    </header>
+    <code class="block">{{ prompt_b }}</code>
+    <h3>Model Reasoning (B)</h3>
+    <div>{{ reasoning_b_html | safe }}</div>
+    <h3>Model Final (B)</h3>
+    <div>{{ final_b_html | safe }}</div>
+  </article>
+{% endblock %}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or 'Mirror Findings Explorer' }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+      /* Theme tokens */
+      :root {
+        --bg: #0b1220;
+        --bg-soft: #0e1627;
+        --surface: rgba(18, 26, 43, 0.65);
+        --border: rgba(255,255,255,0.06);
+        --fg: #e5e7eb;
+        --muted: #94a3b8;
+        --accent: #7dd3fc;
+        --accent-2: #a78bfa;
+        --danger: #f87171;
+        --ok: #34d399;
+        --warn: #fbbf24;
+        --shadow: 0 10px 30px rgba(0,0,0,0.35);
+      }
+      [data-theme='light'] {
+        --bg: #f6f8fb;
+        --bg-soft: #ffffff;
+        --surface: rgba(255,255,255,0.85);
+        --border: #e5e7eb;
+        --fg: #0f172a;
+        --muted: #475569;
+        --accent: #0ea5e9;
+        --accent-2: #7c3aed;
+        --danger: #dc2626;
+        --ok: #059669;
+        --warn: #d97706;
+        --shadow: 0 8px 24px rgba(15, 23, 42, 0.15);
+      }
+
+      html, body { height: 100%; }
+      body {
+        background: radial-gradient(1200px 800px at 10% 10%, rgba(59,130,246,0.15), transparent 60%),
+                    radial-gradient(1000px 800px at 90% 20%, rgba(20,184,166,0.12), transparent 60%),
+                    linear-gradient(180deg, var(--bg), var(--bg-soft));
+        color: var(--fg);
+      }
+      .shell { max-width: 1240px; margin: 0 auto; padding: 1.25rem; }
+
+      header { margin: 0 0 1.5rem; }
+      nav.container { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+      .brand a { color: var(--fg); text-decoration: none; font-weight: 700; letter-spacing: .2px; }
+      .nav-actions { display: flex; gap: .5rem; align-items: center; }
+      .nav-pill { padding:.45rem .9rem; border-radius: 999px; border:1px solid var(--border); background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+
+      .kpi { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 1rem; }
+      .card { padding: 1rem; border: 1px solid var(--border); border-radius: .9rem; background: var(--surface); box-shadow: var(--shadow); backdrop-filter: blur(8px); }
+      .card .h2 { font-size: 1.8rem; margin-top: .35rem; color: var(--accent); }
+
+      table { width: 100%; border-collapse: collapse; border-radius: .75rem; overflow: hidden; box-shadow: var(--shadow); }
+      thead { background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); }
+      table th, table td { border-bottom: 1px solid var(--border); padding: .65rem .8rem; color: var(--fg); }
+      table tr:hover td { background: rgba(255,255,255,0.03); }
+      table td, table th { white-space: nowrap; }
+
+      .gap-high { background: rgba(248, 113, 113, 0.10); }
+      .gap-mid  { background: rgba(251, 191, 36, 0.10); }
+      .gap-low  { background: rgba(52, 211, 153, 0.08); }
+
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      code.block { white-space: pre-wrap; display: block; padding: .9rem; background: #0c1324; color: #dbeafe; border: 1px solid var(--border); border-radius: .6rem; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
+
+      .badge { display:inline-block; padding: .25rem .55rem; border-radius: .5rem; font-size: .8rem; border:1px solid var(--border); background: var(--surface); color: var(--fg); }
+      .btn { cursor: pointer; border: 1px solid var(--border); background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)); color: var(--fg); padding: .6rem .9rem; border-radius: .6rem; box-shadow: var(--shadow); }
+      .btn[aria-pressed='true']{ outline: 2px solid var(--accent); }
+      .muted { color: var(--muted); }
+
+      footer { margin: 3rem 0 2rem; color: var(--muted); font-size: 0.95rem; }
+
+      /* Forms */
+      .controls { display:flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+      select, input[type='search'] { background: var(--surface); color: var(--fg); border:1px solid var(--border); border-radius: .6rem; padding:.55rem .7rem; box-shadow: var(--shadow); }
+      label { color: var(--muted); font-size: .9rem; }
+    </style>
+    <script>
+      // Persisted theme with no-flash
+      (function(){
+        try {
+          const saved = localStorage.getItem('theme');
+          if (saved) document.documentElement.setAttribute('data-theme', saved);
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <nav class="container">
+          <div class="brand"><a href="{{ url_for('main.home') }}">Mirror Findings Explorer</a></div>
+          <div class="nav-actions">
+            <a class="nav-pill" href="{{ url_for('main.browse') }}">Browse</a>
+            <button class="btn" id="toggle-theme" aria-pressed="false" title="Toggle theme">Toggle theme</button>
+          </div>
+        </nav>
+      </header>
+
+      {% block content %}{% endblock %}
+
+      <footer>Generated from files in <code class="mono">findings/</code>. Updated {{ now or '' }}.</footer>
+    </main>
+
+    <script>
+      // Theme toggle + broadcast for charts
+      (function(){
+        const btn = document.getElementById('toggle-theme');
+        if (!btn) return;
+        function setTheme(t){
+          document.documentElement.setAttribute('data-theme', t);
+          try { localStorage.setItem('theme', t); } catch(e){}
+          window.dispatchEvent(new Event('themechange'));
+        }
+        btn.addEventListener('click', () => {
+          const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+          const next = cur === 'dark' ? 'light' : 'dark';
+          setTheme(next);
+          btn.setAttribute('aria-pressed', String(next==='light'));
+        });
+      })();
+    </script>
+  </body>
+</html>

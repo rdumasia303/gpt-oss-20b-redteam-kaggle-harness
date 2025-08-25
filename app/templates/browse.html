@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Browse findings</h2>
+  <p class="muted">Select a pair and optionally a cycle to open the detailed markdown view.</p>
+
+  <div class="card">
+    <div class="controls">
+      <label for="pairSelect">Pair</label>
+      <select id="pairSelect">
+        {% for pid, items in index.items() %}
+          <option value="{{ pid }}">{{ pid }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="cycleSelect">Cycle</label>
+      <select id="cycleSelect">
+        <option value="">Latest</option>
+      </select>
+
+      <button class="btn" id="openBtn">Open</button>
+    </div>
+  </div>
+
+  <script id="browse-data" type="application/json">{{ index | tojson }}</script>
+  <script>
+    (function(){
+      const dataEl = document.getElementById('browse-data');
+      const idx = JSON.parse(dataEl.textContent || '{}');
+      const pairSel = document.getElementById('pairSelect');
+      const cycleSel = document.getElementById('cycleSelect');
+      const openBtn = document.getElementById('openBtn');
+
+      function populateCycles(){
+        const pid = pairSel.value;
+        const items = idx[pid] || [];
+        // items: [ [cycle, relpath], ... ] already sorted newest first
+        cycleSel.innerHTML = '';
+        const optLatest = document.createElement('option');
+        optLatest.value = '';
+        optLatest.textContent = 'Latest';
+        cycleSel.appendChild(optLatest);
+        for (const [c, _] of items) {
+          const opt = document.createElement('option');
+          opt.value = c === 'root' ? '' : c;
+          opt.textContent = c;
+          cycleSel.appendChild(opt);
+        }
+      }
+
+      pairSel.addEventListener('change', populateCycles);
+      populateCycles();
+
+      openBtn.addEventListener('click', () => {
+        const pid = pairSel.value;
+        const cyc = cycleSel.value;
+        const base = `{{ url_for('main.pair_detail', pair_id='__PID__') }}`;
+        const withCycle = `{{ url_for('main.pair_detail', pair_id='__PID__', cycle_name='__CYCLE__') }}`;
+        const href = cyc ? withCycle.replace('__PID__', encodeURIComponent(pid)).replace('__CYCLE__', encodeURIComponent(cyc))
+                         : base.replace('__PID__', encodeURIComponent(pid));
+        window.location.href = href;
+      });
+    })();
+  </script>
+{% endblock %}

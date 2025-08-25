@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% block content %}
+  <section class="kpi">
+    <div class="card"><strong>Pairs</strong><div class="h2">{{ totals.pairs or 0 }}</div></div>
+    <div class="card"><strong>Prompts (runs)</strong><div class="h2">{{ totals.prompts or 0 }}</div></div>
+    <div class="card"><strong>Helped (count)</strong><div class="h2">{{ totals.helped or 0 }}</div></div>
+    <div class="card"><strong>Helped (%)</strong><div class="h2">{% if (totals.prompts or 0) > 0 %}{{ ((totals.helped / totals.prompts) * 100) | round(1) }}%{% else %}-{% endif %}</div></div>
+  </section>
+
+  <h2 style="margin-top:1rem">Mirror pairs</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Pair</th>
+        <th>Assist A</th>
+        <th>Assist B</th>
+        <th>Mirror Bias</th>
+        <th>Alignment Volatility</th>
+        <th>Refusal Propensity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in stats %}
+        {% set gap = s.volatility_gap_pp %}
+        {% set gap_class = 'gap-low' %}
+        {% if gap >= 40 %}{% set gap_class = 'gap-high' %}{% elif gap >= 20 %}{% set gap_class = 'gap-mid' %}{% endif %}
+        <tr class="{{ gap_class }}">
+          <td><a href="{{ url_for('main.pair_detail', pair_id=s.id) }}" class="mono">{{ s.id }}</a></td>
+          <td>{{ (s.assist_a_pct)|round(1) }}%</td>
+          <td>{{ (s.assist_b_pct)|round(1) }}%</td>
+          <td>{% if s.mirror_bias_toward %}{{ s.mirror_bias_toward }}{% else %}&mdash;{% endif %}</td>
+          <td>{{ (s.volatility_gap_pp)|round(1) }} pp</td>
+          <td>{{ (s.refusal_propensity)|round(1) }}%</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <article style="margin-top:1.25rem">
+    <h2>Overview</h2>
+    <div class="card" style="padding:1rem">
+      <canvas id="assistChart" height="120"></canvas>
+    </div>
+    <div class="card" style="padding:1rem; margin-top:1rem">
+      <canvas id="gapChart" height="100"></canvas>
+    </div>
+  </article>
+
+  {% if cycles %}
+    <details style="margin-top:1rem">
+      <summary>Available cycles (latest last)</summary>
+      <ul>
+        {% for c in cycles %}<li><span class="badge">{{ c.name }}</span></li>{% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+
+  <script id="chart-data" type="application/json">{{ {
+    'labels': labels,
+    'assistA': assistA,
+    'assistB': assistB,
+    'gaps': gaps
+  } | tojson }}</script>
+  <script>
+  (function(){
+    const el = document.getElementById('chart-data');
+    if (!el) return;
+    const data = JSON.parse(el.textContent || '{}');
+
+    function buildCharts(){
+      const labels = data.labels || [];
+      const assistA = data.assistA || [];
+      const assistB = data.assistB || [];
+      const gaps = data.gaps || [];
+
+      const isDark = (document.documentElement.getAttribute('data-theme')||'dark') === 'dark';
+      const grid = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+      const tick = isDark ? '#94a3b8' : '#475569';
+
+      const ctx1 = document.getElementById('assistChart').getContext('2d');
+      const ctx2 = document.getElementById('gapChart').getContext('2d');
+
+      if (window._assistChart) { window._assistChart.destroy(); }
+      if (window._gapChart) { window._gapChart.destroy(); }
+
+      window._assistChart = new Chart(ctx1, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: 'Assist A %', data: assistA, backgroundColor: 'rgba(16, 185, 129, 0.7)' },
+            { label: 'Assist B %', data: assistB, backgroundColor: 'rgba(59, 130, 246, 0.7)' }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'bottom', labels: { color: tick } } },
+          scales: { y: { suggestedMax: 100, grid: { color: grid }, ticks: { color: tick } }, x: { ticks: { color: tick } } }
+        }
+      });
+
+      window._gapChart = new Chart(ctx2, {
+        type: 'line',
+        data: { labels: labels, datasets: [{ label: 'Volatility gap (pp)', data: gaps, borderColor: 'rgba(234, 88, 12, 0.95)', backgroundColor: 'rgba(234, 88, 12, 0.25)', fill: true, tension: .35 }] },
+        options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: tick } } }, scales: { y: { suggestedMax: 100, grid: { color: grid }, ticks: { color: tick } }, x: { ticks: { color: tick } } } }
+      });
+    }
+
+    buildCharts();
+    window.addEventListener('themechange', buildCharts);
+  })();
+  </script>
+{% endblock %}
