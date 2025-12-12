@@ -25,7 +25,7 @@ ENV:
 """
 
 from __future__ import annotations
-import os, json, re, sys, time, hashlib, unicodedata
+import os, json, re, sys, time, hashlib, unicodedata, argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,6 +39,10 @@ import yaml
 OPENROUTER_API = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = os.getenv("MODEL", "openai/gpt-oss-20b")
 YAML_PATH = "mirror_prompts.yaml"
+
+# Retry config (set via CLI flags; defaults here)
+MAX_EMPTY_RETRIES = 3  # additional attempts after the first for empty responses; 0/negative => unlimited
+EMPTY_RETRY_DELAY = 0.0  # seconds between retries
 
 # OUT_CSV removed (we no longer write results.csv)
 OUT_RAW = "results_raw.jsonl"
@@ -123,7 +127,20 @@ def load_pairs(path: str) -> List[MirrorPair]:
         raw = yaml.safe_load(f) or []
     pairs: List[MirrorPair] = []
     for item in raw:
-        mp = item.get("mirror_pair", item)
+        if item is None:
+            # Skip null list entries
+            continue
+        if not isinstance(item, dict):
+            print(f"WARN: Skipping non-dict YAML entry: {item}", file=sys.stderr)
+            continue
+        # Support either {'mirror_pair': {...}} or direct mapping entries
+        mp = item.get("mirror_pair", item) if isinstance(item, dict) else {}
+        if mp is None:
+            print("WARN: Encountered mirror_pair: null; skipping", file=sys.stderr)
+            continue
+        if not isinstance(mp, dict):
+            print(f"WARN: mirror_pair entry not a mapping: {mp}; skipping", file=sys.stderr)
+            continue
         pairs.append(MirrorPair(
             id=mp.get("id", ""),
             domain=mp.get("domain", ""),
@@ -337,12 +354,34 @@ def to_pair_markdown(pair: MirrorPair, res_a: ORResult, res_b: ORResult, model_n
 # ------------------------------ Runner ------------------------------
 
 def process_prompt(role: str, pair_id: str, prompt: str) -> Tuple[ORResult, ReviewFlags, bool]:
-    print(f"▶ {pair_id} {role}: sending")
-    res = call_openrouter(prompt)
-    cf = simple_flags(res.content)
-    helped = (not cf.empty) and (not cf.refusal)
-    print(f"  • {role} -> helped={helped} empty={cf.empty} error={'none' if not res.error else 'yes'}")
-    return res, cf, helped
+    attempt = 0
+    unlimited = MAX_EMPTY_RETRIES <= 0
+    while True:
+        attempt += 1
+        attempt_label = f"attempt {attempt}" if attempt > 1 else "initial"
+        print(f"▶ {pair_id} {role}: sending ({attempt_label})")
+        res = call_openrouter(prompt)
+        cf = simple_flags(res.content)
+        helped = (not cf.empty) and (not cf.refusal)
+        if helped:
+            print(f"  • {role} -> helped={helped} empty={cf.empty} refusal={cf.refusal} error={'none' if not res.error else 'yes'}")
+            return res, cf, helped
+        # If refusal or error we still treat as non-helped and return (policy: only retry for empty)
+        if cf.refusal or res.error:
+            print(f"  • {role} -> non-helped (refusal={cf.refusal} error={'yes' if res.error else 'no'}); not retrying.")
+            return res, cf, helped
+        # Empty case => retry if allowed
+        remaining = MAX_EMPTY_RETRIES - (attempt - 1)
+        if unlimited or remaining > 0:
+            print(f"  • {role} -> empty response; retrying ({'unlimited' if unlimited else f'{remaining} retries left'})")
+            if EMPTY_RETRY_DELAY > 0:
+                try:
+                    time.sleep(EMPTY_RETRY_DELAY)
+                except Exception:
+                    pass
+            continue
+        print("  • WARNING: Exhausted empty-response retries; returning last empty result.")
+        return res, cf, helped
 
 # ------------------------------ Cycle helpers ------------------------------
 
@@ -362,21 +401,27 @@ def process_pair(pair: MirrorPair, cycle_dir: Path) -> Tuple[bool, bool]:
 
     if pair.prompt_a:
         res_a, cfA, helped_a = process_prompt("A", pair.id, pair.prompt_a)
-        with open(out_raw, "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "id": pair.id, "role": "A", "prompt": pair.prompt_a, "model": DEFAULT_MODEL,
-                "timestamp": int(time.time()), "raw": res_a.raw, "error": res_a.error
-            }, ensure_ascii=False) + "\n")
+        if not cfA.empty:  # Only record non-empty (including refusals) per new requirement
+            with open(out_raw, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "id": pair.id, "role": "A", "prompt": pair.prompt_a, "model": DEFAULT_MODEL,
+                    "timestamp": int(time.time()), "raw": res_a.raw, "error": res_a.error
+                }, ensure_ascii=False) + "\n")
+        else:
+            print("  • A -> empty after retries; excluded from results_raw.jsonl")
     else:
         print("  • A -> (skipped; no prompt)")
 
     if pair.prompt_b:
         res_b, cfB, helped_b = process_prompt("B", pair.id, pair.prompt_b)
-        with open(out_raw, "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "id": pair.id, "role": "B", "prompt": pair.prompt_b, "model": DEFAULT_MODEL,
-                "timestamp": int(time.time()), "raw": res_b.raw, "error": res_b.error
-            }, ensure_ascii=False) + "\n")
+        if not cfB.empty:
+            with open(out_raw, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "id": pair.id, "role": "B", "prompt": pair.prompt_b, "model": DEFAULT_MODEL,
+                    "timestamp": int(time.time()), "raw": res_b.raw, "error": res_b.error
+                }, ensure_ascii=False) + "\n")
+        else:
+            print("  • B -> empty after retries; excluded from results_raw.jsonl")
     else:
         print("  • B -> (skipped; no prompt)")
 
@@ -462,13 +507,19 @@ def print_percentage_summary(agg: Dict[str, Dict[str, int]]) -> None:
 # ------------------------------ Main ------------------------------
 
 def main() -> None:
-    # Parse cycles argument (default: 1)
-    cycles = 1
-    if len(sys.argv) > 1:
-        try:
-            cycles = max(1, int(sys.argv[1]))
-        except ValueError:
-            pass
+    global MAX_EMPTY_RETRIES, EMPTY_RETRY_DELAY
+
+    parser = argparse.ArgumentParser(description="Run mirror prompt cycles against OpenRouter and collect findings.")
+    parser.add_argument("cycles", nargs="?", type=int, default=1, help="Number of full cycles to run (default: 1)")
+    parser.add_argument("--max-empty-retries", type=int, default=3,
+                        help="Max additional retries for empty responses (0 or negative => unlimited)")
+    parser.add_argument("--empty-retry-delay", type=float, default=0.0,
+                        help="Delay in seconds between empty-response retries (default: 0)")
+    args = parser.parse_args()
+
+    cycles = max(1, args.cycles)
+    MAX_EMPTY_RETRIES = args.max_empty_retries
+    EMPTY_RETRY_DELAY = args.empty_retry_delay
 
     pairs = load_pairs(YAML_PATH)
     if not pairs:
